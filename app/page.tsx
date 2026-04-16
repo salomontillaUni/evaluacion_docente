@@ -4,20 +4,32 @@ import React, { useState } from "react";
 import { motion } from "motion/react";
 import { Lock, Mail, ChevronRight, UserCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { DEMO_USERS, ROLE_HOME, validateDemoCredentials } from "./lib/auth";
 
 export default function Home() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const [email, setEmail] = useState(DEMO_USERS[2].email);
+  const [password, setPassword] = useState(DEMO_USERS[2].password);
+  const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
     setIsLoading(true);
+    const user = validateDemoCredentials(email, password);
 
-    // Simulate login delay to show loading state
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    setIsLoading(false);
 
-    // Redirect to the default view (you can adjust this later based on roles)
-    router.push("/views/estudiante");
+    if (!user) {
+      setError("Credenciales inválidas. Usa alguno de los accesos de ejemplo.");
+      return;
+    }
+
+    document.cookie = `role=${user.role}; path=/; max-age=${60 * 60 * 8}; samesite=lax`;
+    document.cookie = `user_name=${encodeURIComponent(user.name)}; path=/; max-age=${60 * 60 * 8}; samesite=lax`;
+    router.push(ROLE_HOME[user.role]);
   };
 
   return (
@@ -64,6 +76,8 @@ export default function Home() {
                     type="email"
                     required
                     placeholder="usuario@universidad.edu"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
                     className="w-full pl-11 pr-4 py-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all outline-none text-slate-900 dark:text-white placeholder-slate-400"
                   />
                 </div>
@@ -89,9 +103,28 @@ export default function Home() {
                     type="password"
                     required
                     placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                     className="w-full pl-11 pr-4 py-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all outline-none text-slate-900 dark:text-white placeholder-slate-400"
                   />
                 </div>
+              </div>
+
+              {error && (
+                <p className="text-sm text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  {error}
+                </p>
+              )}
+
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 bg-slate-50/70 dark:bg-slate-900/40">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                  Accesos de ejemplo:
+                </p>
+                <ul className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                  <li>`admin@universidad.edu` / `admin123`</li>
+                  <li>`docente@universidad.edu` / `docente123`</li>
+                  <li>`estudiante@universidad.edu` / `estudiante123`</li>
+                </ul>
               </div>
 
               <div className="pt-2">
