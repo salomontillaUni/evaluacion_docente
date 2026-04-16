@@ -13,6 +13,8 @@ import {
 import { toast } from "sonner";
 import { docentes } from "../../components/mockData";
 import { motion } from "motion/react";
+import { getDb } from "@/app/lib/firebase";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 
 const MAX_CHARS = 1000;
 
@@ -52,7 +54,6 @@ export default function StudentView() {
     setIsAnalyzing(true);
     setResult(null);
 
-    // Simular análisis NLP
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     const sentimientos = ["Positivo", "Neutro", "Negativo"];
@@ -69,18 +70,27 @@ export default function StudentView() {
 
     const uniqueId = `EVAL-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
-    setResult({
+    const resumen = `El comentario expresa una opinión ${randomSentiment.toLowerCase()} sobre el desempeño docente de ${selectedDocenteObj?.nombre}. Se identifican ${
+      randomSentiment === "Positivo"
+        ? "fortalezas en la metodología de enseñanza y comunicación efectiva"
+        : randomSentiment === "Negativo"
+          ? "áreas de mejora en la comunicación y los métodos de evaluación"
+          : "aspectos generales del desempeño sin inclinación marcada"
+    }.`;
+
+    // 🔥 Guardar en Firestore
+    const db = await getDb();
+    await addDoc(collection(db, "evaluaciones"), {
+      docente_id: selectedDocente,
+      docente_nombre: selectedDocenteObj?.nombre,
+      comentario,
       sentimiento: randomSentiment,
-      resumen: `El comentario expresa una opinión ${randomSentiment.toLowerCase()} sobre el desempeño docente de ${selectedDocenteObj?.nombre}. Se identifican ${
-        randomSentiment === "Positivo"
-          ? "fortalezas en la metodología de enseñanza y comunicación efectiva"
-          : randomSentiment === "Negativo"
-            ? "áreas de mejora en la comunicación y los métodos de evaluación"
-            : "aspectos generales del desempeño sin inclinación marcada"
-      }.`,
-      id: uniqueId,
+      resumen,
+      referencia_publica: uniqueId,
+      created_at: serverTimestamp(),
     });
 
+    setResult({ sentimiento: randomSentiment, resumen, id: uniqueId });
     setIsAnalyzing(false);
     toast.success("Análisis completado exitosamente");
   };
@@ -322,7 +332,6 @@ export default function StudentView() {
           </div>
 
           <div className="p-8 space-y-8 relative">
-            {/* Sentimiento */}
             <div className="flex flex-col sm:flex-row gap-6 items-start sm:items-center justify-between">
               <div>
                 <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
@@ -340,7 +349,6 @@ export default function StudentView() {
                 </div>
               </div>
 
-              {/* Confirmación Badge */}
               <div className="flex items-center gap-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 rounded-2xl px-5 py-3 shadow-sm">
                 <CheckCircle2 className="w-6 h-6 text-emerald-500" />
                 <div>
@@ -356,7 +364,6 @@ export default function StudentView() {
 
             <hr className="border-slate-100 dark:border-slate-800" />
 
-            {/* Resumen */}
             <div>
               <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-2">
                 <BrainCircuit className="w-4 h-4" />
