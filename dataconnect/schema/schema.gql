@@ -1,0 +1,53 @@
+type User @table {
+  email: String!
+  fullName: String!
+  role: String!
+  isActive: Boolean! @default(value: true)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type Departamento @table {
+  nombre: String!
+  createdAt: Timestamp!
+}
+
+type Materia @table {
+  codigo: String!
+  nombre: String!
+  createdAt: Timestamp!
+  departamento: Departamento
+}
+
+type PeriodoAcademico @table {
+  codigo: String!
+  fechaInicio: Date!
+  fechaFin: Date!
+  estado: String! # e.g., 'activo', 'finalizado'
+  createdAt: Timestamp!
+}
+
+type Docente @table {
+  createdAt: Timestamp!
+  user: User
+  departamento: Departamento
+}
+
+type Estudiante @table {
+  createdAt: Timestamp!
+  codigoEstudiante: String
+  user: User
+}
+
+type Evaluacion @table {
+  comentario: String!
+  createdAt: Timestamp!
+  updatedAt: Timestamp!
+  sentimiento: String
+  resumenNlp: String
+  referenciaPublica: String
+  docente: Docente
+  periodoAcademico: PeriodoAcademico
+  materia: Materia
+  estudiante: Estudiante
+}
