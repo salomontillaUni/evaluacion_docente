@@ -1,5 +1,5 @@
 "use client";
-import { BrainCircuit, GraduationCap, LogOut, ShieldCheck, UserRound } from "lucide-react";
+import { BrainCircuit, GraduationCap, LogOut, ShieldCheck, UserRound, Users } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -31,6 +31,12 @@ const navByRole: Record<
       label: "Administrador",
       icon: ShieldCheck,
       description: "Dashboard y gestión",
+    },
+    {
+      to: "/views/admin/personal",
+      label: "Gestión de Personal",
+      icon: Users,
+      description: "Docentes y estudiantes",
     },
   ],
 };
@@ -79,7 +85,12 @@ export default function Sidebar() {
 
       <nav className="flex-1 p-4 space-y-2">
         {navItems.map((item) => {
-          const isActive = pathname.startsWith(item.to);
+          // For admin dashboard, only highlight when exactly on /views/admin (not subroutes)
+          const isActive =
+            item.to === "/views/admin"
+              ? pathname === "/views/admin"
+              : pathname.startsWith(item.to);
+
           return (
             <Link
               key={item.to}
