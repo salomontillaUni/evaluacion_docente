@@ -4,32 +4,57 @@ import React, { useState } from "react";
 import { motion } from "motion/react";
 import { Lock, Mail, ChevronRight, UserCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { DEMO_USERS, ROLE_HOME, validateDemoCredentials } from "./lib/auth";
+import { ROLE_HOME, type UserRole } from "./lib/auth";
+import { getAuthClient, getDb } from "./lib/firebase";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 
 export default function Home() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
-  const [email, setEmail] = useState(DEMO_USERS[2].email);
-  const [password, setPassword] = useState(DEMO_USERS[2].password);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     setError("");
     setIsLoading(true);
-    const user = validateDemoCredentials(email, password);
 
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    setIsLoading(false);
+    try {
+      const auth = await getAuthClient();
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
 
-    if (!user) {
-      setError("Credenciales inválidas. Usa alguno de los accesos de ejemplo.");
-      return;
+      // Obtener el rol del usuario desde Firestore
+      const db = await getDb();
+      const userDoc = await getDoc(doc(db, "usuarios", user.uid));
+      
+      let role: UserRole = "estudiante";
+      let name = user.displayName || user.email?.split('@')[0] || "Usuario";
+
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        role = userData.role as UserRole;
+        name = userData.name || name;
+      }
+
+      // Guardar en cookies para compatibilidad con el middleware/rutas existentes
+      document.cookie = `role=${role}; path=/; max-age=${60 * 60 * 8}; samesite=lax`;
+      document.cookie = `user_name=${encodeURIComponent(name)}; path=/; max-age=${60 * 60 * 8}; samesite=lax`;
+      
+      router.push(ROLE_HOME[role]);
+    } catch (err: any) {
+      console.error("Error de login:", err);
+      if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
+        setError("Credenciales inválidas. Por favor verifica tu correo y contraseña.");
+      } else {
+        setError("Ocurrió un error al intentar iniciar sesión. Inténtalo de nuevo.");
+      }
+    } finally {
+      setIsLoading(false);
     }
-
-    document.cookie = `role=${user.role}; path=/; max-age=${60 * 60 * 8}; samesite=lax`;
-    document.cookie = `user_name=${encodeURIComponent(user.name)}; path=/; max-age=${60 * 60 * 8}; samesite=lax`;
-    router.push(ROLE_HOME[user.role]);
   };
 
   return (
@@ -115,17 +140,6 @@ export default function Home() {
                   {error}
                 </p>
               )}
-
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 bg-slate-50/70 dark:bg-slate-900/40">
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-                  Accesos de ejemplo:
-                </p>
-                <ul className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
-                  <li>`admin@universidad.edu` / `admin123`</li>
-                  <li>`docente@universidad.edu` / `docente123`</li>
-                  <li>`estudiante@universidad.edu` / `estudiante123`</li>
-                </ul>
-              </div>
 
               <div className="pt-2">
                 <motion.button
