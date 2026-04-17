@@ -12,7 +12,7 @@ CREATE TYPE sentimiento_type AS ENUM ('positivo', 'neutro', 'negativo');
 
 -- ===== Core identities =====
 CREATE TABLE users (
-  id BIGSERIAL PRIMARY KEY,
+  id VARCHAR(128) PRIMARY KEY, -- Firebase UID
   email CITEXT NOT NULL UNIQUE,
   full_name VARCHAR(120) NOT NULL,
   role role_type NOT NULL,
@@ -49,14 +49,14 @@ CREATE TABLE periodos_academicos (
 -- ===== Role-specific profiles =====
 CREATE TABLE docentes (
   id BIGSERIAL PRIMARY KEY,
-  user_id BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  user_id VARCHAR(128) NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
   departamento_id BIGINT REFERENCES departamentos(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE estudiantes (
   id BIGSERIAL PRIMARY KEY,
-  user_id BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  user_id VARCHAR(128) NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
   codigo_estudiante VARCHAR(30) UNIQUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
