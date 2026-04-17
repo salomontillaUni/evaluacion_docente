@@ -19,17 +19,6 @@ export const getDb = async () => {
   return getFirestore(app);
 };
 
-export const getSecondaryAuth = async () => {
-  const { initializeApp, getApps } = await import("firebase/app");
-  const { getAuth } = await import("firebase/auth");
-  const secondaryAppName = "SecondaryAdminApp";
-  let secondaryApp = getApps().find((a) => a.name === secondaryAppName);
-  if (!secondaryApp) {
-    secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
-  }
-  return getAuth(secondaryApp);
-};
-
 export const getAuthClient = async () => {
   const { getAuth } = await import("firebase/auth");
   return getAuth(app);

@@ -1,6 +1,3 @@
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
-
-overrides:
-  '@firebasegen/example-connector': link:app/lib/dataconnect-generated
