@@ -46,12 +46,6 @@ const navByRole: Record<
       icon: ShieldCheck,
       description: "Vista general",
     },
-    {
-      to: "/views/admin/personal",
-      label: "Gestión de Personal",
-      icon: Users,
-      description: "Docentes y estudiantes",
-    },
   ],
 };
 
