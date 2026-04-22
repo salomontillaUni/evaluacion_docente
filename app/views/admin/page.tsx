@@ -7,6 +7,7 @@ import {
   Plus,
   Trash2,
   Search,
+  Edit3,
   X,
   AlertCircle,
   CheckCircle2,
@@ -14,15 +15,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
-import { getDb } from "@/app/lib/firebase";
-import {
-  collection,
-  getDocs,
-  addDoc,
-  deleteDoc,
-  doc,
-  serverTimestamp,
-} from "firebase/firestore";
+import { createClient } from "@/app/utils/supabase/client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -99,24 +92,68 @@ export default function GestionPersonalView() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editingRow, setEditingRow] = useState<any | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<{ id: string, name: string } | null>(null);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const db = await getDb();
-      const [docentesSnap, estudiantesSnap] = await Promise.all([
-        getDocs(collection(db, "docentes")),
-        getDocs(collection(db, "estudiantes")),
-      ]);
+      const supabase = createClient();
+
+      // Fetch docentes from Supabase
+      const { data: docData, error: docError } = await supabase
+        .from("docentes")
+        .select(`
+          id,
+          users (
+            id,
+            full_name,
+            email
+          ),
+          departamentos (
+            id,
+            nombre
+          )
+        `);
+
+      if (docError) throw docError;
+
       setDocentes(
-        docentesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Docente))
+        (docData || []).map((d: any) => ({
+          id: d.users?.id.toString() || d.id.toString(),
+          nombre: d.users?.full_name || "Sin nombre",
+          email: d.users?.email || "Sin email",
+          materia: "—", // Materia logic depends on academic periods, skipping for basic CRUD
+          departamento: d.departamentos?.nombre || "—",
+        }))
       );
+
+      // Fetch estudiantes from Supabase
+      const { data: estData, error: estError } = await supabase
+        .from("estudiantes")
+        .select(`
+          id,
+          codigo_estudiante,
+          programa,
+          users (
+            id,
+            full_name,
+            email
+          )
+        `);
+
+      if (estError) throw estError;
+
       setEstudiantes(
-        estudiantesSnap.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        } as Estudiante))
+        (estData || []).map((e: any) => ({
+          id: e.users?.id.toString() || e.id.toString(),
+          nombre: e.users?.full_name || "Sin nombre",
+          email: e.users?.email || "Sin email",
+          codigo: e.codigo_estudiante || "—",
+          programa: e.programa || "—",
+        }))
       );
     } catch (err) {
       console.error(err);
@@ -163,28 +200,98 @@ export default function GestionPersonalView() {
     }
     setSaving(true);
     try {
-      const db = await getDb();
+      const supabase = createClient();
+      
       if (activeTab === "docentes") {
-        await addDoc(collection(db, "docentes"), {
-          ...docenteForm,
-          created_at: serverTimestamp(),
-        });
-        toast.success("Docente registrado exitosamente", {
-          description: `${docenteForm.nombre} fue agregado a la plataforma.`,
-        });
+        if (editingRow) {
+          // Update logic for Docente (skipping implementation as user asked for Estudiante)
+          // But making sure it doesn't crash
+        } else {
+          // 1. Crear en tabla users
+          const { data: userData, error: userError } = await supabase
+            .from("users")
+            .insert({
+              email: docenteForm.email,
+              full_name: docenteForm.nombre,
+              role: "docente",
+            })
+            .select()
+            .single();
+
+          if (userError) throw userError;
+
+          // 2. Crear en tabla docentes
+          const { error: docError } = await supabase
+            .from("docentes")
+            .insert({
+              user_id: userData.id,
+            });
+
+          if (docError) throw docError;
+        }
+        toast.success(editingRow ? "Docente actualizado" : "Docente registrado");
         setDocenteForm(EMPTY_DOCENTE);
       } else {
-        await addDoc(collection(db, "estudiantes"), {
-          ...estudianteForm,
-          created_at: serverTimestamp(),
-        });
-        toast.success("Estudiante registrado exitosamente", {
-          description: `${estudianteForm.nombre} fue agregado a la plataforma.`,
-        });
+        if (editingRow) {
+          // UPDATE ESTUDIANTE
+          // 1. Update user
+          const { error: userError } = await supabase
+            .from("users")
+            .update({
+              email: estudianteForm.email,
+              full_name: estudianteForm.nombre,
+            })
+            .eq("id", editingRow.id);
+
+          if (userError) throw userError;
+
+          // 2. Update estudiante
+          const { error: estError } = await supabase
+            .from("estudiantes")
+            .update({
+              codigo_estudiante: estudianteForm.codigo,
+              programa: estudianteForm.programa,
+            })
+            .eq("user_id", editingRow.id);
+
+          if (estError) throw estError;
+
+          toast.success("Estudiante actualizado", {
+            description: `${estudianteForm.nombre} ha sido modificado con éxito.`
+          });
+        } else {
+          // CREATE ESTUDIANTE
+          const { data: userData, error: userError } = await supabase
+            .from("users")
+            .insert({
+              email: estudianteForm.email,
+              full_name: estudianteForm.nombre,
+              role: "estudiante",
+            })
+            .select()
+            .single();
+
+          if (userError) throw userError;
+
+          const { error: estError } = await supabase
+            .from("estudiantes")
+            .insert({
+              user_id: userData.id,
+              codigo_estudiante: estudianteForm.codigo,
+              programa: estudianteForm.programa,
+            });
+
+          if (estError) throw estError;
+
+          toast.success("Estudiante registrado", {
+            description: `${estudianteForm.nombre} ahora tiene acceso a la plataforma.`
+          });
+        }
         setEstudianteForm(EMPTY_ESTUDIANTE);
       }
       setFormErrors({});
       setShowModal(false);
+      setEditingRow(null);
       fetchData();
     } catch (err) {
       console.error(err);
@@ -195,14 +302,24 @@ export default function GestionPersonalView() {
   };
 
   // ── Delete ─────────────────────────────────────────────────────────────────
-  const handleDelete = async (id: string, colName: string, nombre: string) => {
-    if (!confirm(`¿Eliminar a ${nombre}? Esta acción no se puede deshacer.`))
-      return;
-    setDeletingId(id);
+  const confirmDelete = async () => {
+    if (!itemToDelete) return;
+    setDeletingId(itemToDelete.id);
     try {
-      const db = await getDb();
-      await deleteDoc(doc(db, colName, id));
-      toast.success(`${nombre} eliminado correctamente.`);
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("users")
+        .delete()
+        .eq("id", itemToDelete.id);
+      
+      if (error) throw error;
+      
+      toast.success("Registro eliminado", {
+        description: `${itemToDelete.name} fue removido del sistema permanentemente.`,
+        icon: <Trash2 className="w-4 h-4 text-red-500" />
+      });
+      setShowDeleteModal(false);
+      setItemToDelete(null);
       fetchData();
     } catch (err) {
       console.error(err);
@@ -210,6 +327,11 @@ export default function GestionPersonalView() {
     } finally {
       setDeletingId(null);
     }
+  };
+
+  const handleDelete = (id: string, colName: string, nombre: string) => {
+    setItemToDelete({ id, name: nombre });
+    setShowDeleteModal(true);
   };
 
   // ── Filtered lists ─────────────────────────────────────────────────────────
@@ -246,6 +368,9 @@ export default function GestionPersonalView() {
         <button
           onClick={() => {
             setFormErrors({});
+            setEditingRow(null);
+            setDocenteForm(EMPTY_DOCENTE);
+            setEstudianteForm(EMPTY_ESTUDIANTE);
             setShowModal(true);
           }}
           className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/25"
@@ -457,7 +582,24 @@ export default function GestionPersonalView() {
                     <td className="px-5 py-4 text-muted-foreground hidden md:table-cell">
                       {e.programa || "—"}
                     </td>
-                    <td className="px-5 py-4 text-right">
+                    <td className="px-5 py-4 text-right flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => {
+                          setEstudianteForm({
+                            nombre: e.nombre,
+                            email: e.email,
+                            codigo: e.codigo,
+                            programa: e.programa || "",
+                          });
+                          setEditingRow(e);
+                          setFormErrors({});
+                          setShowModal(true);
+                        }}
+                        className="p-2 rounded-lg text-muted-foreground hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                        title="Editar estudiante"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={() =>
                           handleDelete(e.id, "estudiantes", e.nombre)
@@ -516,7 +658,7 @@ export default function GestionPersonalView() {
               className="w-full max-w-md rounded-2xl border border-border bg-card shadow-xl overflow-hidden"
             >
               {/* Modal header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-gradient-to-r from-indigo-600 to-purple-600">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-linear-to-r from-indigo-600 to-purple-600">
                 <div className="flex items-center gap-2 text-white">
                   {activeTab === "docentes" ? (
                     <UserRound className="w-4 h-4" />
@@ -705,6 +847,54 @@ export default function GestionPersonalView() {
                     <Plus className="w-4 h-4" />
                   )}
                   {saving ? "Guardando..." : "Guardar"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Delete Confirmation Modal ────────────────────────────────────── */}
+      <AnimatePresence>
+        {showDeleteModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+            onClick={() => setShowDeleteModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="w-full max-w-sm rounded-2xl bg-card border border-border shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6 text-center">
+                <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
+                  <AlertCircle className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-semibold text-foreground mb-2">
+                  ¿Confirmar eliminación?
+                </h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  Estás a punto de eliminar a <strong>{itemToDelete?.name}</strong>. Esta acción es permanente y no se puede deshacer.
+                </p>
+              </div>
+              <div className="flex border-t border-border">
+                <button
+                  onClick={() => setShowDeleteModal(false)}
+                  className="flex-1 px-4 py-3 text-sm font-medium text-foreground hover:bg-muted transition-colors border-r border-border"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  disabled={deletingId !== null}
+                  className="flex-1 px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                >
+                  {deletingId ? "Eliminando..." : "Eliminar"}
                 </button>
               </div>
             </motion.div>

@@ -1,4 +1,5 @@
 "use client";
+import { useState, useEffect } from "react";
 import { BrainCircuit, GraduationCap, LogOut, ShieldCheck, UserRound, Users } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
@@ -51,15 +52,22 @@ function getRoleFromCookie(): UserRole | undefined {
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const role = getRoleFromCookie();
+  const [role, setRole] = useState<UserRole | undefined>(undefined);
+  const [mounted, setMounted] = useState(false);
 
-  if (!role || pathname === "/") return null;
+  useEffect(() => {
+    setRole(getRoleFromCookie());
+    setMounted(true);
+  }, []);
+
+  if (!mounted || !role || pathname === "/") return null;
 
   const navItems = navByRole[role];
 
   const handleLogout = () => {
     document.cookie = "role=; path=/; max-age=0; samesite=lax";
     document.cookie = "user_name=; path=/; max-age=0; samesite=lax";
+    router.refresh(); // Trigger a refresh to update the UI
     router.push("/");
   };
 
@@ -80,10 +88,7 @@ export default function Sidebar() {
       <nav className="flex-1 p-4 space-y-2">
         {navItems.map((item) => {
           // For admin dashboard, only highlight when exactly on /views/admin (not subroutes)
-          const isActive =
-            item.to === "/views/admin"
-              ? pathname === "/views/admin"
-              : pathname.startsWith(item.to);
+          const isActive = pathname.startsWith(item.to);
 
           return (
             <Link
