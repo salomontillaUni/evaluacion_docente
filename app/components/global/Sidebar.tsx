@@ -48,12 +48,20 @@ function getRoleFromCookie(): UserRole | undefined {
   return undefined;
 }
 
+import { useState, useEffect } from "react";
+
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
+  
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const role = getRoleFromCookie();
 
-  if (!role || pathname === "/") return null;
+  if (!mounted || !role || pathname === "/") return null;
 
   const navItems = navByRole[role];
 
