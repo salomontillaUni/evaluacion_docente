@@ -1,22 +1,25 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
-  Send,
-  Eraser,
-  ChevronDown,
-  CheckCircle2,
-  BrainCircuit,
-  Sparkles,
-  FileText,
-  MessageSquareText,
+  Send, Eraser, ChevronDown, CheckCircle2,
+  BrainCircuit, Sparkles, FileText, MessageSquareText,
 } from "lucide-react";
 import { toast } from "sonner";
-import { docentes } from "../../components/mockData";
 import { motion } from "motion/react";
-import { getDb } from "@/app/lib/firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { createClient } from "@/app/lib/supabase";
+
 
 const MAX_CHARS = 1000;
+
+
+interface Docente {
+  id: number;
+  user_id: string;
+  users: {
+    full_name: string;
+  } | null;
+}
+
 
 interface AnalysisResult {
   sentimiento: string;
@@ -24,29 +27,58 @@ interface AnalysisResult {
   id: string;
 }
 
+
 export default function StudentView() {
-  const [selectedDocente, setSelectedDocente] = useState("");
+  const [docentes, setDocentes] = useState<Docente[]>([]);
+  const [selectedDocente, setSelectedDocente] = useState<number | null>(null);
   const [comentario, setComentario] = useState("");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [errors, setErrors] = useState<{
-    docente?: string;
-    comentario?: string;
-  }>({});
+  const [errors, setErrors] = useState<{ docente?: string; comentario?: string }>({});
 
+
+  const supabase = createClient();
   const charsRemaining = MAX_CHARS - comentario.length;
   const selectedDocenteObj = docentes.find((d) => d.id === selectedDocente);
 
+
+  useEffect(() => {
+    const fetchDocentes = async () => {
+      const { data, error } = await supabase
+        .from("docentes")
+        .select("id, user_id, users(full_name)");
+
+
+      if (error) {
+        toast.error("No se pudieron cargar los docentes");
+        console.error(error);
+        return;
+      }
+
+
+      const mapped = (data || []).map((d) => ({
+        ...d,
+        users: Array.isArray(d.users) ? d.users[0] : d.users,
+      }));
+
+
+      setDocentes(mapped);
+    };
+
+
+    fetchDocentes();
+  }, []);
+
+
   const validate = () => {
     const newErrors: typeof errors = {};
-    if (!selectedDocente)
-      newErrors.docente = "Debes seleccionar un docente para evaluar.";
-    if (!comentario.trim())
-      newErrors.comentario = "El comentario no puede estar vacío.";
+    if (!selectedDocente) newErrors.docente = "Debes seleccionar un docente para evaluar.";
+    if (!comentario.trim()) newErrors.comentario = "El comentario no puede estar vacío.";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
+
 
   const handleAnalyze = async () => {
     if (!validate()) return;
@@ -54,46 +86,66 @@ export default function StudentView() {
     setIsAnalyzing(true);
     setResult(null);
 
+    // 1. Obtener el periodo activo
+    const { data: periodoData, error: periodoError } = await supabase
+      .from("periodos_academicos")
+      .select("id")
+      .eq("estado", "activo")
+      .single();
+
+    if (periodoError || !periodoData) {
+      toast.error("No hay un período académico activo");
+      setIsAnalyzing(false);
+      return;
+    }
+
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    const sentimientos = ["Positivo", "Neutro", "Negativo"];
     const randomSentiment =
       comentario.toLowerCase().includes("excelente") ||
       comentario.toLowerCase().includes("bueno") ||
       comentario.toLowerCase().includes("gran")
         ? "Positivo"
         : comentario.toLowerCase().includes("malo") ||
-            comentario.toLowerCase().includes("deficiente") ||
-            comentario.toLowerCase().includes("pésimo")
-          ? "Negativo"
-          : sentimientos[Math.floor(Math.random() * sentimientos.length)];
+          comentario.toLowerCase().includes("deficiente") ||
+          comentario.toLowerCase().includes("pésimo")
+        ? "Negativo"
+        : ["Positivo", "Neutro", "Negativo"][Math.floor(Math.random() * 3)];
 
-    const uniqueId = `EVAL-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    const uniqueId = `EVAL-${Date.now().toString(36).toUpperCase()}-${Math.random()
+      .toString(36)
+      .substring(2, 6)
+      .toUpperCase()}`;
 
-    const resumen = `El comentario expresa una opinión ${randomSentiment.toLowerCase()} sobre el desempeño docente de ${selectedDocenteObj?.nombre}. Se identifican ${
+    const resumen = `El comentario expresa una opinión ${randomSentiment.toLowerCase()} sobre el desempeño docente de ${selectedDocenteObj?.users?.full_name}. Se identifican ${
       randomSentiment === "Positivo"
         ? "fortalezas en la metodología de enseñanza y comunicación efectiva"
         : randomSentiment === "Negativo"
-          ? "áreas de mejora en la comunicación y los métodos de evaluación"
-          : "aspectos generales del desempeño sin inclinación marcada"
+        ? "áreas de mejora en la comunicación y los métodos de evaluación"
+        : "aspectos generales del desempeño sin inclinación marcada"
     }.`;
 
-    // 🔥 Guardar en Firestore
-    const db = await getDb();
-    await addDoc(collection(db, "evaluaciones"), {
+    const { error } = await supabase.from("evaluaciones").insert({
       docente_id: selectedDocente,
-      docente_nombre: selectedDocenteObj?.nombre,
       comentario,
-      sentimiento: randomSentiment,
-      resumen,
+      sentimiento: randomSentiment.toLowerCase(),
+      resumen_nlp: resumen,
       referencia_publica: uniqueId,
-      created_at: serverTimestamp(),
+      periodo_id: periodoData.id, // ✅ fix
     });
+
+    if (error) {
+      toast.error("Error al guardar la evaluación");
+      console.error("Supabase error:", JSON.stringify(error, null, 2));
+      setIsAnalyzing(false);
+      return;
+    }
 
     setResult({ sentimiento: randomSentiment, resumen, id: uniqueId });
     setIsAnalyzing(false);
     toast.success("Análisis completado exitosamente");
   };
+
 
   const handleClear = () => {
     setComentario("");
@@ -101,27 +153,24 @@ export default function StudentView() {
     setErrors({});
   };
 
+
   const getSentimentColor = (s: string) => {
     switch (s) {
-      case "Positivo":
-        return "bg-emerald-100 text-emerald-800 border-emerald-200";
-      case "Negativo":
-        return "bg-red-100 text-red-800 border-red-200";
-      default:
-        return "bg-amber-100 text-amber-800 border-amber-200";
+      case "Positivo": return "bg-emerald-100 text-emerald-800 border-emerald-200";
+      case "Negativo": return "bg-red-100 text-red-800 border-red-200";
+      default: return "bg-amber-100 text-amber-800 border-amber-200";
     }
   };
 
+
   const getSentimentIcon = (s: string) => {
     switch (s) {
-      case "Positivo":
-        return "😊";
-      case "Negativo":
-        return "😟";
-      default:
-        return "😐";
+      case "Positivo": return "😊";
+      case "Negativo": return "😟";
+      default: return "😐";
     }
   };
+
 
   return (
     <motion.div
@@ -143,6 +192,7 @@ export default function StudentView() {
         </p>
       </div>
 
+
       <div className="bg-white/70 dark:bg-slate-900/70 backdrop-blur-2xl border border-white/20 dark:border-slate-800 rounded-3xl shadow-xl p-6 md:p-8">
         {/* Selector de Docente */}
         <div className="mb-8">
@@ -159,21 +209,14 @@ export default function StudentView() {
                   : "border-slate-200 dark:border-slate-800 hover:border-indigo-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10"
               }`}
             >
-              <span
-                className={
-                  selectedDocenteObj
-                    ? "text-slate-900 dark:text-white font-medium"
-                    : "text-slate-400"
-                }
-              >
+              <span className={selectedDocenteObj ? "text-slate-900 dark:text-white font-medium" : "text-slate-400"}>
                 {selectedDocenteObj
-                  ? `${selectedDocenteObj.nombre} — ${selectedDocenteObj.materia}`
+                  ? selectedDocenteObj.users?.full_name
                   : "Selecciona un profesor..."}
               </span>
-              <ChevronDown
-                className={`w-5 h-5 text-slate-400 transition-transform duration-300 ${isDropdownOpen ? "rotate-180 text-indigo-500" : ""}`}
-              />
+              <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform duration-300 ${isDropdownOpen ? "rotate-180 text-indigo-500" : ""}`} />
             </button>
+
 
             {isDropdownOpen && (
               <motion.div
@@ -181,29 +224,30 @@ export default function StudentView() {
                 animate={{ opacity: 1, y: 0 }}
                 className="absolute z-20 mt-2 w-full bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden max-h-60 overflow-y-auto"
               >
-                {docentes.map((d) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedDocente(d.id);
-                      setIsDropdownOpen(false);
-                      setErrors((prev) => ({ ...prev, docente: undefined }));
-                    }}
-                    className={`w-full text-left px-5 py-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border-b border-slate-100 dark:border-slate-800 last:border-b-0 ${
-                      selectedDocente === d.id
-                        ? "bg-indigo-50/50 dark:bg-indigo-500/10"
-                        : ""
-                    }`}
-                  >
-                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                      {d.nombre}
-                    </p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                      {d.materia} · {d.departamento}
-                    </p>
-                  </button>
-                ))}
+                {docentes.length === 0 ? (
+                  <p className="text-center text-slate-400 py-6 text-sm">
+                    No hay docentes disponibles
+                  </p>
+                ) : (
+                  docentes.map((d) => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDocente(d.id);
+                        setIsDropdownOpen(false);
+                        setErrors((prev) => ({ ...prev, docente: undefined }));
+                      }}
+                      className={`w-full text-left px-5 py-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border-b border-slate-100 dark:border-slate-800 last:border-b-0 ${
+                        selectedDocente === d.id ? "bg-indigo-50/50 dark:bg-indigo-500/10" : ""
+                      }`}
+                    >
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                        {d.users?.full_name}
+                      </p>
+                    </button>
+                  ))
+                )}
               </motion.div>
             )}
           </div>
@@ -219,18 +263,17 @@ export default function StudentView() {
           )}
         </div>
 
+
         {/* Área de Texto */}
         <div className="mb-8">
           <label className="block mb-2 text-sm font-medium text-slate-700 dark:text-slate-300 ml-1">
             Tu retroalimentación
           </label>
-          <div
-            className={`relative rounded-2xl border bg-white dark:bg-slate-950 transition-all ${
-              errors.comentario
-                ? "border-red-400 ring-2 ring-red-100"
-                : "border-slate-200 dark:border-slate-800 focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/10"
-            }`}
-          >
+          <div className={`relative rounded-2xl border bg-white dark:bg-slate-950 transition-all ${
+            errors.comentario
+              ? "border-red-400 ring-2 ring-red-100"
+              : "border-slate-200 dark:border-slate-800 focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/10"
+          }`}>
             <textarea
               value={comentario}
               onChange={(e) => {
@@ -244,15 +287,13 @@ export default function StudentView() {
               rows={6}
               className="w-full px-5 py-4 rounded-t-2xl bg-transparent text-slate-900 dark:text-white placeholder-slate-400 resize-none outline-none leading-relaxed"
             />
-            <div
-              className={`flex items-center justify-between px-5 py-3 border-t border-slate-100 dark:border-slate-800 text-xs font-medium ${
-                charsRemaining < 100
-                  ? charsRemaining < 20
-                    ? "text-red-500"
-                    : "text-amber-500"
-                  : "text-slate-400"
-              }`}
-            >
+            <div className={`flex items-center justify-between px-5 py-3 border-t border-slate-100 dark:border-slate-800 text-xs font-medium ${
+              charsRemaining < 100
+                ? charsRemaining < 20
+                  ? "text-red-500"
+                  : "text-amber-500"
+                : "text-slate-400"
+            }`}>
               <span className="flex items-center gap-1.5">
                 <FileText className="w-3.5 h-3.5" />
                 Máximo {MAX_CHARS} caracteres
@@ -273,6 +314,7 @@ export default function StudentView() {
             </motion.p>
           )}
         </div>
+
 
         {/* Botones */}
         <div className="flex flex-col sm:flex-row gap-4 mb-2">
@@ -311,6 +353,7 @@ export default function StudentView() {
         </div>
       </div>
 
+
       {/* Resultado del Análisis */}
       {result && (
         <motion.div
@@ -331,6 +374,7 @@ export default function StudentView() {
             </p>
           </div>
 
+
           <div className="p-8 space-y-8 relative">
             <div className="flex flex-col sm:flex-row gap-6 items-start sm:items-center justify-between">
               <div>
@@ -341,13 +385,12 @@ export default function StudentView() {
                   <div className="h-12 w-12 rounded-2xl flex items-center justify-center bg-slate-50 dark:bg-slate-800 text-2xl shadow-sm border border-slate-100 dark:border-slate-700">
                     {getSentimentIcon(result.sentimiento)}
                   </div>
-                  <span
-                    className={`inline-flex items-center px-4 py-2 rounded-xl text-sm font-semibold border ${getSentimentColor(result.sentimiento)}`}
-                  >
+                  <span className={`inline-flex items-center px-4 py-2 rounded-xl text-sm font-semibold border ${getSentimentColor(result.sentimiento)}`}>
                     {result.sentimiento}
                   </span>
                 </div>
               </div>
+
 
               <div className="flex items-center gap-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 rounded-2xl px-5 py-3 shadow-sm">
                 <CheckCircle2 className="w-6 h-6 text-emerald-500" />
@@ -362,7 +405,9 @@ export default function StudentView() {
               </div>
             </div>
 
+
             <hr className="border-slate-100 dark:border-slate-800" />
+
 
             <div>
               <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-2">
