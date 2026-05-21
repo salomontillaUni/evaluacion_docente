@@ -50,7 +50,6 @@ export default function Login() {
       // Guardar en cookies para compatibilidad con el middleware/rutas existentes
       document.cookie = `role=${role}; path=/; max-age=${60 * 60 * 8}; samesite=lax`;
       document.cookie = `user_name=${encodeURIComponent(name)}; path=/; max-age=${60 * 60 * 8}; samesite=lax`;
-      console.log(role);
       router.push(ROLE_HOME[role]);
     } catch (err: any) {
       console.error("Error de login:", err);
