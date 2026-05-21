@@ -86,64 +86,73 @@ export default function StudentView() {
     setIsAnalyzing(true);
     setResult(null);
 
-    // 1. Obtener el periodo activo
-    const { data: periodoData, error: periodoError } = await supabase
-      .from("periodos_academicos")
-      .select("id")
-      .eq("estado", "activo")
-      .single();
+    try {
+      // 1. Obtener el periodo activo
+      const { data: periodoData, error: periodoError } = await supabase
+        .from("periodos_academicos")
+        .select("id")
+        .eq("estado", "activo")
+        .single();
 
-    if (periodoError || !periodoData) {
-      toast.error("No hay un período académico activo");
+      if (periodoError || !periodoData) {
+        toast.error("No hay un período académico activo");
+        setIsAnalyzing(false);
+        return;
+      }
+
+      // 2. Llamar a la API de análisis con Gemini
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          comentario,
+          docenteNombre: selectedDocenteObj?.users?.full_name,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Error al analizar el comentario con la API");
+      }
+
+      const analysis = await response.json();
+      const rawSentimiento = analysis.sentimiento; // 'positivo' | 'neutro' | 'negativo'
+      const resumen = analysis.resumen;
+
+      const uniqueId = `EVAL-${Date.now().toString(36).toUpperCase()}-${Math.random()
+        .toString(36)
+        .substring(2, 6)
+        .toUpperCase()}`;
+
+      // 3. Guardar la evaluación en la base de datos Supabase con los datos reales
+      const { error } = await supabase.from("evaluaciones").insert({
+        docente_id: selectedDocente,
+        comentario,
+        sentimiento: rawSentimiento,
+        resumen_nlp: resumen,
+        referencia_publica: uniqueId,
+        periodo_id: periodoData.id,
+      });
+
+      if (error) {
+        toast.error("Error al guardar la evaluación");
+        console.error("Supabase error:", JSON.stringify(error, null, 2));
+        setIsAnalyzing(false);
+        return;
+      }
+
+      const capitalizedSentiment =
+        rawSentimiento.charAt(0).toUpperCase() + rawSentimiento.slice(1).toLowerCase();
+
+      setResult({ sentimiento: capitalizedSentiment, resumen, id: uniqueId });
+      toast.success("Análisis completado exitosamente");
+    } catch (err: any) {
+      console.error("Error al procesar la evaluación:", err);
+      toast.error(err.message || "Ocurrió un error inesperado al procesar la evaluación");
+    } finally {
       setIsAnalyzing(false);
-      return;
     }
-
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    const randomSentiment =
-      comentario.toLowerCase().includes("excelente") ||
-      comentario.toLowerCase().includes("bueno") ||
-      comentario.toLowerCase().includes("gran")
-        ? "Positivo"
-        : comentario.toLowerCase().includes("malo") ||
-          comentario.toLowerCase().includes("deficiente") ||
-          comentario.toLowerCase().includes("pésimo")
-        ? "Negativo"
-        : ["Positivo", "Neutro", "Negativo"][Math.floor(Math.random() * 3)];
-
-    const uniqueId = `EVAL-${Date.now().toString(36).toUpperCase()}-${Math.random()
-      .toString(36)
-      .substring(2, 6)
-      .toUpperCase()}`;
-
-    const resumen = `El comentario expresa una opinión ${randomSentiment.toLowerCase()} sobre el desempeño docente de ${selectedDocenteObj?.users?.full_name}. Se identifican ${
-      randomSentiment === "Positivo"
-        ? "fortalezas en la metodología de enseñanza y comunicación efectiva"
-        : randomSentiment === "Negativo"
-        ? "áreas de mejora en la comunicación y los métodos de evaluación"
-        : "aspectos generales del desempeño sin inclinación marcada"
-    }.`;
-
-    const { error } = await supabase.from("evaluaciones").insert({
-      docente_id: selectedDocente,
-      comentario,
-      sentimiento: randomSentiment.toLowerCase(),
-      resumen_nlp: resumen,
-      referencia_publica: uniqueId,
-      periodo_id: periodoData.id, // ✅ fix
-    });
-
-    if (error) {
-      toast.error("Error al guardar la evaluación");
-      console.error("Supabase error:", JSON.stringify(error, null, 2));
-      setIsAnalyzing(false);
-      return;
-    }
-
-    setResult({ sentimiento: randomSentiment, resumen, id: uniqueId });
-    setIsAnalyzing(false);
-    toast.success("Análisis completado exitosamente");
   };
 
 
