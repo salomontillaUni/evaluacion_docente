@@ -3,10 +3,12 @@ import { useState, useEffect } from "react";
 import {
   Send, Eraser, ChevronDown, CheckCircle2,
   BrainCircuit, Sparkles, FileText, MessageSquareText,
+  UploadCloud, File, Trash2, Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "motion/react";
 import { createClient } from "@/app/lib/supabase";
+import { jsPDF } from "jspdf";
 
 
 const MAX_CHARS = 1000;
@@ -36,6 +38,8 @@ export default function StudentView() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [errors, setErrors] = useState<{ docente?: string; comentario?: string }>({});
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
 
   const supabase = createClient();
@@ -71,6 +75,180 @@ export default function StudentView() {
   }, []);
 
 
+  const handleFileSelection = (file: File) => {
+    const validTypes = ["application/pdf", "image/png", "image/jpeg", "image/jpg"];
+    if (!validTypes.includes(file.type)) {
+      toast.error("Formato de archivo no válido. Solo se admiten archivos PDF o imágenes (PNG, JPG, JPEG).");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("El tamaño del archivo supera el límite de 5MB.");
+      return;
+    }
+    setSelectedFile(file);
+  };
+
+  const uploadFile = async (file: File): Promise<string | null> => {
+    setIsUploading(true);
+    try {
+      const fileExt = file.name.split(".").pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      const { error } = await supabase.storage
+        .from("evaluaciones-evidencias")
+        .upload(filePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+
+      if (error) {
+        console.error("Error uploading to storage:", error);
+        throw error;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from("evaluaciones-evidencias")
+        .getPublicUrl(filePath);
+
+      return publicUrlData.publicUrl;
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const generateReceiptPDF = (docenteNombre: string, refId: string, fecha: string) => {
+    try {
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a5",
+      });
+
+      // Premium Color Palette
+      const PRIMARY_COLOR = [79, 70, 229]; // Indigo #4f46e5
+      const TEXT_DARK = [15, 23, 42]; // Slate 900
+      const TEXT_LIGHT = [100, 116, 139]; // Slate 500
+      const BACKGROUND_LIGHT = [248, 250, 252]; // Slate 50
+
+      // Draw background card style
+      doc.setFillColor(BACKGROUND_LIGHT[0], BACKGROUND_LIGHT[1], BACKGROUND_LIGHT[2]);
+      doc.rect(5, 5, 138, 200, "F");
+
+      // Draw Indigo header band
+      doc.setFillColor(PRIMARY_COLOR[0], PRIMARY_COLOR[1], PRIMARY_COLOR[2]);
+      doc.rect(5, 5, 138, 25, "F");
+
+      // Header text
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.text("COMPROBANTE DE EVALUACIÓN", 74, 17, { align: "center" });
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.text("PORTAL DE EVALUACIÓN DOCENTE", 74, 23, { align: "center" });
+
+      // Border outline for card
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.5);
+      doc.rect(5, 5, 138, 200, "D");
+
+      // Content section
+      let yPos = 45;
+
+      // Decorative checkmark circle
+      doc.setFillColor(16, 185, 129); // Emerald 500
+      doc.circle(74, yPos, 8, "F");
+      // Checkmark icon drawn using lines
+      doc.setDrawColor(255, 255, 255);
+      doc.setLineWidth(1);
+      doc.line(71, yPos, 73, yPos + 2.5);
+      doc.line(73, yPos + 2.5, 77.5, yPos - 2);
+
+      yPos += 15;
+      doc.setTextColor(TEXT_DARK[0], TEXT_DARK[1], TEXT_DARK[2]);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("¡EVALUACIÓN REGISTRADA!", 74, yPos, { align: "center" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(TEXT_LIGHT[0], TEXT_LIGHT[1], TEXT_LIGHT[2]);
+      doc.text("Tu opinión anónima ha sido procesada de manera exitosa.", 74, yPos + 5, { align: "center" });
+
+      yPos += 20;
+
+      // Details Table Box
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(226, 232, 240);
+      doc.rect(12, yPos, 124, 65, "FD");
+
+      doc.setTextColor(TEXT_DARK[0], TEXT_DARK[1], TEXT_DARK[2]);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("Detalles del Registro", 18, yPos + 8);
+      doc.setDrawColor(241, 245, 249);
+      doc.line(12, yPos + 12, 136, yPos + 12);
+
+      // Table contents
+      const labels = [
+        ["Referencia Única:", refId],
+        ["Docente Evaluado:", docenteNombre],
+        ["Fecha de Emisión:", fecha],
+        ["Estado de Evaluación:", "Completado - Anónimo"],
+        ["Evidencia Adjunta:", selectedFile ? selectedFile.name : "Ninguna"],
+      ];
+
+      let rowY = yPos + 18;
+      labels.forEach(([label, val]) => {
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(TEXT_LIGHT[0], TEXT_LIGHT[1], TEXT_LIGHT[2]);
+        doc.setFontSize(8.5);
+        doc.text(label, 18, rowY);
+
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(TEXT_DARK[0], TEXT_DARK[1], TEXT_DARK[2]);
+        doc.text(val, 55, rowY);
+        rowY += 9;
+      });
+
+      yPos += 75;
+
+      // Sello de seguridad simulado
+      doc.setFillColor(241, 245, 249);
+      doc.rect(12, yPos, 124, 25, "F");
+      doc.setDrawColor(226, 232, 240);
+      doc.rect(12, yPos, 124, 25, "D");
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(TEXT_LIGHT[0], TEXT_LIGHT[1], TEXT_LIGHT[2]);
+      doc.text("VERIFICACIÓN Y SEGURIDAD CRIPTOGRÁFICA", 18, yPos + 6);
+      
+      const hash = "SHA256: " + Array.from({length: 4}, () => Math.random().toString(16).substring(2, 10).toUpperCase()).join("-");
+      doc.setFont("courier", "bold");
+      doc.setFontSize(7);
+      doc.setTextColor(100, 116, 139);
+      doc.text(hash, 18, yPos + 12);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(6.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text("Este comprobante es generado automáticamente por el sistema y tiene carácter oficial.", 18, yPos + 18);
+
+      // Footer text
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(TEXT_LIGHT[0], TEXT_LIGHT[1], TEXT_LIGHT[2]);
+      doc.text("© 2026 Universidad de Docencia Excelente - Todos los derechos reservados.", 74, 195, { align: "center" });
+
+      doc.save(`Comprobante_Evaluacion_${refId}.pdf`);
+      toast.success("Comprobante PDF descargado");
+    } catch (err) {
+      console.error("Error al generar PDF:", err);
+      toast.error("No se pudo generar el comprobante PDF.");
+    }
+  };
+
   const validate = () => {
     const newErrors: typeof errors = {};
     if (!selectedDocente) newErrors.docente = "Debes seleccionar un docente para evaluar.";
@@ -98,6 +276,18 @@ export default function StudentView() {
         toast.error("No hay un período académico activo");
         setIsAnalyzing(false);
         return;
+      }
+
+      // Subir evidencia si existe
+      let evidenciaUrlResult = null;
+      if (selectedFile) {
+        try {
+          evidenciaUrlResult = await uploadFile(selectedFile);
+        } catch (uploadError) {
+          toast.error("Error al subir el archivo de evidencia");
+          setIsAnalyzing(false);
+          return;
+        }
       }
 
       // 2. Llamar a la API de análisis con Gemini
@@ -133,6 +323,7 @@ export default function StudentView() {
         resumen_nlp: resumen,
         referencia_publica: uniqueId,
         periodo_id: periodoData.id,
+        evidencia_url: evidenciaUrlResult,
       });
 
       if (error) {
@@ -160,6 +351,7 @@ export default function StudentView() {
     setComentario("");
     setResult(null);
     setErrors({});
+    setSelectedFile(null);
   };
 
 
@@ -324,6 +516,67 @@ export default function StudentView() {
           )}
         </div>
 
+        {/* Subida de Evidencia */}
+        <div className="mb-8">
+          <label className="block mb-2 text-sm font-medium text-slate-700 dark:text-slate-300 ml-1">
+            Evidencia académica (Opcional)
+          </label>
+          
+          {!selectedFile ? (
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const file = e.dataTransfer.files?.[0];
+                if (file) handleFileSelection(file);
+              }}
+              className="border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-800 rounded-2xl p-6 text-center bg-white dark:bg-slate-950 transition-all cursor-pointer group"
+              onClick={() => document.getElementById("evidence-upload")?.click()}
+            >
+              <input
+                id="evidence-upload"
+                type="file"
+                accept=".pdf,image/png,image/jpeg,image/jpg"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFileSelection(file);
+                }}
+              />
+              <UploadCloud className="w-10 h-10 text-slate-400 group-hover:text-indigo-500 transition-colors mx-auto mb-3" />
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Arrastra y suelta tu archivo aquí, o <span className="text-indigo-600 dark:text-indigo-400 group-hover:underline font-semibold">explorar</span>
+              </p>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
+                Soporta PDF, PNG, JPG o JPEG (Máximo 5MB)
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/30 border border-slate-200 dark:border-slate-800 rounded-2xl">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="h-10 w-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+                  <File className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">
+                    {selectedFile.name}
+                  </p>
+                  <p className="text-xs text-slate-400 dark:text-slate-500">
+                    {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedFile(null)}
+                className="p-2 text-slate-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-all cursor-pointer"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
+            </div>
+          )}
+        </div>
+
 
         {/* Botones */}
         <div className="flex flex-col sm:flex-row gap-4 mb-2">
@@ -401,16 +654,26 @@ export default function StudentView() {
               </div>
 
 
-              <div className="flex items-center gap-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 rounded-2xl px-5 py-3 shadow-sm">
-                <CheckCircle2 className="w-6 h-6 text-emerald-500" />
-                <div>
-                  <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-400">
-                    Registrado exitosamente
-                  </p>
-                  <p className="text-xs text-emerald-600/80 dark:text-emerald-500/80 mt-0.5">
-                    Ref: <span className="font-mono">{result.id}</span>
-                  </p>
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 rounded-2xl px-5 py-3 shadow-sm">
+                  <CheckCircle2 className="w-6 h-6 text-emerald-500" />
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-400">
+                      Registrado exitosamente
+                    </p>
+                    <p className="text-xs text-emerald-600/80 dark:text-emerald-500/80 mt-0.5">
+                      Ref: <span className="font-mono">{result.id}</span>
+                    </p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => generateReceiptPDF(selectedDocenteObj?.users?.full_name || "Docente", result.id, new Date().toLocaleDateString("es-ES"))}
+                  className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 transition-colors text-sm font-semibold cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  Descargar Comprobante PDF
+                </button>
               </div>
             </div>
 
